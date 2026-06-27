@@ -356,20 +356,7 @@ async function analyze() {
     document.getElementById('resultsArea').style.display = 'block';
     document.getElementById('summaryRow').style.display = 'flex';
 
-  } catch (e) {
-    hideStatus();
-    showError('Error fetching data: ' + e.message);
-  } finally {
-    document.getElementById('analyzeBtn').disabled = false;
-  }
-}
-
-    hideStatus();
-    buildSummary();
-    renderTable();
-    document.getElementById('resultsArea').style.display = 'block';
-    document.getElementById('summaryRow').style.display = 'flex';
-  } catch (e) {
+    } catch (e) {
     hideStatus();
     showError('Error fetching data: ' + e.message);
   } finally {
