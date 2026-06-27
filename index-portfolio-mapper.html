@@ -390,6 +390,58 @@ async function fetchTransferLogs(addr, maxPages) {
   return allLogs;
 }
 
+
+async function fetchPortfolioTransferLogs(wallets, maxPages) {
+  const normalizedWallets = [...new Set(wallets.map(normalizeAddr).filter(Boolean))];
+  if (!normalizedWallets.length) return [];
+
+  const latestHex = await rpc('eth_blockNumber', []);
+  const latest = parseInt(latestHex, 16);
+
+  // Same depth as the single-wallet fallback, but scanned once for the whole portfolio.
+  const blocksToScan = Math.min(2000000, Math.max(100000, maxPages * 100000));
+  const fromBlock = Math.max(0, latest - blocksToScan);
+  const chunkSize = 50000;
+  const walletTopics = normalizedWallets.map(topicAddress);
+  const allLogs = [];
+  const seen = new Set();
+
+  async function scanDirection(directionName, topics) {
+    for (let start = fromBlock; start <= latest; start += chunkSize) {
+      const end = Math.min(latest, start + chunkSize - 1);
+      setStatus(`Batched portfolio token fallback ${directionName}: blocks ${start.toLocaleString()}-${end.toLocaleString()}...`);
+
+      try {
+        const logs = await rpc('eth_getLogs', [{
+          fromBlock: toHexBlock(start),
+          toBlock: toHexBlock(end),
+          topics
+        }]);
+
+        if (Array.isArray(logs)) {
+          for (const log of logs) {
+            const key = `${log.transactionHash || ''}:${log.logIndex || ''}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            allLogs.push(log);
+          }
+        }
+      } catch (e) {
+        console.warn(`Batched portfolio token fallback failed for ${directionName} ${start}-${end}:`, e);
+      }
+
+      await new Promise(r => setTimeout(r, 120));
+    }
+  }
+
+  // One pass for any portfolio wallet as Transfer.from, one pass for any portfolio wallet as Transfer.to.
+  // This avoids re-scanning the same block ranges once for every wallet in the portfolio.
+  await scanDirection('sent', [TRANSFER_TOPIC, walletTopics]);
+  await scanDirection('received', [TRANSFER_TOPIC, null, walletTopics]);
+
+  return allLogs;
+}
+
 async function addFallbackTokenInteractions(addr, maxPages) {
   const logs = await fetchTransferLogs(addr, maxPages);
   const seen = new Set();
@@ -862,6 +914,7 @@ function tokenAmountFromTx(tx) {
 async function scanPortfolioWallet(wallet, walletSet, edgeMap, tokenContracts, maxPages) {
   const nativeOffset = 50;
   const tokenOffset = 25;
+  let tokenApiFailed = false;
 
   for (let p = 1; p <= maxPages; p++) {
     setStatus(`Portfolio native scan ${shortAddr(wallet)} page ${p}/${maxPages}...`);
@@ -881,9 +934,8 @@ async function scanPortfolioWallet(wallet, walletSet, edgeMap, tokenContracts, m
     await new Promise(r => setTimeout(r, 150));
   }
 
-  let tokenApiFailed = false;
   for (let p = 1; p <= maxPages; p++) {
-    setStatus(`Portfolio token scan ${shortAddr(wallet)} page ${p}/${maxPages}...`);
+    setStatus(`Portfolio token API scan ${shortAddr(wallet)} page ${p}/${maxPages}...`);
     const txs = await fetchTokenPage(wallet, p, tokenOffset);
     if (txs === null) { tokenApiFailed = true; break; }
     if (!txs.length) break;
@@ -903,19 +955,27 @@ async function scanPortfolioWallet(wallet, walletSet, edgeMap, tokenContracts, m
     await new Promise(r => setTimeout(r, 150));
   }
 
-  if (tokenApiFailed) {
-    setStatus(`Portfolio fallback token logs for ${shortAddr(wallet)}...`);
-    const logs = await fetchTransferLogs(wallet, maxPages);
-    for (const log of logs) {
-      if (!log || !log.topics || log.topics.length < 3) continue;
-      const from = normalizeAddr(topicToAddress(log.topics[1]));
-      const to = normalizeAddr(topicToAddress(log.topics[2]));
-      const tokenAddress = normalizeAddr(log.address);
-      const symbol = await getTokenSymbol(tokenAddress);
-      if (tokenAddress) tokenContracts[tokenAddress] = { address: tokenAddress, symbol };
-      if (!walletSet.has(from) || !walletSet.has(to)) continue;
-      recordPortfolioEdge(edgeMap, from, to, symbol, 0, 0, tokenAddress);
-    }
+  return tokenApiFailed;
+}
+
+async function addBatchedPortfolioTokenFallback(walletSet, edgeMap, tokenContracts, maxPages) {
+  const wallets = [...walletSet];
+  const logs = await fetchPortfolioTransferLogs(wallets, maxPages);
+
+  setStatus(`Processing ${logs.length} batched portfolio token fallback logs...`);
+
+  for (const log of logs) {
+    if (!log || !log.topics || log.topics.length < 3) continue;
+
+    const from = normalizeAddr(topicToAddress(log.topics[1]));
+    const to = normalizeAddr(topicToAddress(log.topics[2]));
+    if (!walletSet.has(from) || !walletSet.has(to)) continue;
+
+    const tokenAddress = normalizeAddr(log.address);
+    const symbol = await getTokenSymbol(tokenAddress);
+    if (tokenAddress) tokenContracts[tokenAddress] = { address: tokenAddress, symbol };
+
+    recordPortfolioEdge(edgeMap, from, to, symbol, 0, 0, tokenAddress);
   }
 }
 
@@ -971,8 +1031,16 @@ async function analyzePortfolio() {
   document.getElementById('portfolioBalancesBody').innerHTML = '<tr><td colspan="5" style="text-align:center;color:#777;padding:30px">Waiting for discovered tokens...</td></tr>';
 
   try {
+    let anyTokenApiFailed = false;
+
     for (const wallet of portfolioWallets) {
-      await scanPortfolioWallet(wallet, walletSet, edgeMap, tokenContracts, maxPages);
+      const tokenApiFailed = await scanPortfolioWallet(wallet, walletSet, edgeMap, tokenContracts, maxPages);
+      if (tokenApiFailed) anyTokenApiFailed = true;
+    }
+
+    if (anyTokenApiFailed) {
+      setStatus('Token API failed for at least one wallet. Running one batched portfolio fallback scan...');
+      await addBatchedPortfolioTokenFallback(walletSet, edgeMap, tokenContracts, maxPages);
     }
 
     portfolioEdges = Object.values(edgeMap).sort((a, b) => b.count - a.count || b.amount - a.amount);
