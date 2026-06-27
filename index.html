@@ -287,7 +287,7 @@ async function analyze() {
         await new Promise(r => setTimeout(r, 150));
       }
     }
-
+window.analyze = analyze;
     // Contract detection
     const keys = Object.keys(allInteractions);
     setStatus(`Checking ${keys.length} addresses for contract status...`);
