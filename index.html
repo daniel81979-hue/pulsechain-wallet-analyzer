@@ -198,7 +198,6 @@ async function fetchTxPage(addr, page, offset=50) {
   console.warn('Native tx page skipped:', d.message || d.error || d.upstreamText || d);
   return [];
 }
-}
 
 async function fetchTokenPage(addr, page, offset=25) {
   const url = `${SCAN}?module=account&action=tokentx&address=${addr}&page=${page}&offset=${offset}&sort=desc`;
