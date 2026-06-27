@@ -188,18 +188,28 @@ async function isContract(addr) {
   } catch { return null; }
 }
 
-async function fetchTxPage(addr, page, offset=100) {
+async function fetchTxPage(addr, page, offset=50) {
   const url = `${SCAN}?module=account&action=txlist&address=${addr}&page=${page}&offset=${offset}&sort=desc`;
   const r = await fetch(url);
   const d = await r.json();
-  return d.status === '1' ? d.result : [];
+
+  if (d.status === '1' && Array.isArray(d.result)) return d.result;
+
+  console.warn('Native tx page skipped:', d.message || d.error || d.upstreamText || d);
+  return [];
+}
 }
 
-async function fetchTokenPage(addr, page, offset=100) {
+async function fetchTokenPage(addr, page, offset=25) {
   const url = `${SCAN}?module=account&action=tokentx&address=${addr}&page=${page}&offset=${offset}&sort=desc`;
   const r = await fetch(url);
   const d = await r.json();
-  return d.status === '1' ? d.result : [];
+
+  if (d.status === '1' && Array.isArray(d.result)) return d.result;
+
+  console.warn('Token page skipped:', d.message || d.error || d.upstreamText || d);
+  return [];
+}
 }
 
 function addInteraction(addr, otherAddr, type, tokenSymbol, value, timestamp) {
