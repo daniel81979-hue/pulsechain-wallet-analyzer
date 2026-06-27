@@ -253,8 +253,9 @@ async function analyze() {
       for (let p = 1; p <= maxPages; p++) {
         setStatus(`Fetching native tx page ${p}/${maxPages}...`);
         const txs = await fetchTxPage(addr, p);
+        const nativeOffset = 50;
+        const txs = await fetchTxPage(addr, p, nativeOffset);
         if (!txs.length) break;
-        for (const tx of txs) {
           if (!tx.to) continue;
           const val = parseInt(tx.value) / 1e18;
           const ts = parseInt(tx.timeStamp);
@@ -263,7 +264,7 @@ async function analyze() {
           addInteraction(addr, counterparty, isFrom ? 'sent' : 'received', null, isFrom ? val : 0, ts);
           if (!isFrom) allInteractions[counterparty.toLowerCase()].receivedPLS += val;
         }
-        if (txs.length < 100) break;
+        if (txs.length < nativeOffset) break;
         await new Promise(r => setTimeout(r, 150));
       }
     }
@@ -271,7 +272,8 @@ async function analyze() {
     if (doTokens) {
       for (let p = 1; p <= maxPages; p++) {
         setStatus(`Fetching token transfers page ${p}/${maxPages}...`);
-        const txs = await fetchTokenPage(addr, p);
+        const tokenOffset = 25;
+        const txs = await fetchTokenPage(addr, p, tokenOffset);
         if (!txs.length) break;
         for (const tx of txs) {
           if (!tx.to) continue;
@@ -281,7 +283,7 @@ async function analyze() {
           const counterparty = isFrom ? tx.to : tx.from;
           addInteraction(addr, counterparty, isFrom ? 'token_sent' : 'token_received', symbol, 0, ts);
         }
-        if (txs.length < 100) break;
+        if (txs.length < tokenOffset) break;
         await new Promise(r => setTimeout(r, 150));
       }
     }
