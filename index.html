@@ -209,7 +209,6 @@ async function fetchTokenPage(addr, page, offset=25) {
   console.warn('Token page skipped:', d.message || d.error || d.upstreamText || d);
   return [];
 }
-}
 
 function addInteraction(addr, otherAddr, type, tokenSymbol, value, timestamp) {
   if (!otherAddr || otherAddr === '0x0000000000000000000000000000000000000000') return;
